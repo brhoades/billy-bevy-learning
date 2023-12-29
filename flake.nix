@@ -14,10 +14,12 @@
           rust-analyzer
           clippy
           rustfmt
+          bacon
 
           pkg-config
           alsaLib
           udev
+          xorg.libX11
         ];
       };
     }));
