@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = [
+  "bins/table-tennis"
+]
+
+[workspace.dependencies]
+bevy = "0.12.1"
+
+
+[package]
+name = "billy-bevy-learning"
+version = "0.1.0"
+edition = "2021"
+
+# Enable a small amount of optimization in debug mode
+[profile.dev]
+opt-level = 1
+
+# Enable high optimizations for dependencies (incl. Bevy), but not for our code:
+[profile.dev.package."*"]
+opt-level = 3
+
