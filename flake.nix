@@ -21,6 +21,14 @@
           udev
           xorg.libX11
         ];
+
+        LD_LIBRARY_PATH = lib.makeLibraryPath (with xorg; [
+          libX11
+          libXcursor
+          libXrandr
+          libXi
+          vulkan-loader
+        ]);
       };
     }));
 }
