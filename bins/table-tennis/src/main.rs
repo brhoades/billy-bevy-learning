@@ -8,7 +8,7 @@ mod constants {
     use bevy::prelude::*;
     // These constants are defined in `Transform` units.
     // Using the default 2D camera they correspond 1:1 with screen pixels.
-    pub const PADDLE_SIZE: Vec3 = Vec3::new(120.0, 20.0, 0.0);
+    pub const PADDLE_SIZE: Vec3 = Vec3::new(20.0, 120.0, 0.0);
     pub const GAP_BETWEEN_PADDLE_AND_WALL: f32 = 60.0;
     pub const PADDLE_SPEED: f32 = 500.0;
     // How close can the paddle get to the wall
@@ -135,24 +135,27 @@ fn setup(
     // Camera
     commands.spawn(Camera2dBundle::default());
 
-    let paddle_y = constants::BOTTOM_WALL + constants::GAP_BETWEEN_PADDLE_AND_WALL;
+    let player_paddle_x = constants::RIGHT_WALL - constants::GAP_BETWEEN_PADDLE_AND_WALL;
+    let enemy_paddle_x = constants::LEFT_WALL + constants::GAP_BETWEEN_PADDLE_AND_WALL;
 
-    commands.spawn((
-        SpriteBundle {
-            transform: Transform {
-                translation: Vec3::new(0.0, paddle_y, 0.0),
-                scale: constants::PADDLE_SIZE,
+    for offset_x in [player_paddle_x, enemy_paddle_x] {
+        commands.spawn((
+            SpriteBundle {
+                transform: Transform {
+                    translation: Vec3::new(offset_x, 0.0, 0.0),
+                    scale: constants::PADDLE_SIZE,
+                    ..default()
+                },
+                sprite: Sprite {
+                    color: constants::PADDLE_COLOR,
+                    ..default()
+                },
                 ..default()
             },
-            sprite: Sprite {
-                color: constants::PADDLE_COLOR,
-                ..default()
-            },
-            ..default()
-        },
-        entities::Paddle,
-        entities::Collider,
-    ));
+            entities::Paddle,
+            entities::Collider,
+        ));
+    }
 
     // Walls
     commands.spawn(entities::Walls::new(entities::WallSide::Top));
