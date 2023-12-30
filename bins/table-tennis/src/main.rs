@@ -15,7 +15,7 @@ mod constants {
     pub const PADDLE_PADDING: f32 = 10.0;
 
     // We set the z-value of the ball to 1 so it renders on top in the case of overlapping sprites.
-    pub const BALL_STARTING_POSITION: Vec3 = Vec3::new(0.0, -50.0, 1.0);
+    pub const BALL_STARTING_POSITION: Vec3 = Vec3::new(-50.0, 0.0, 1.0);
     pub const BALL_SIZE: Vec3 = Vec3::new(30.0, 30.0, 0.0);
     pub const BALL_SPEED: f32 = 400.0;
     pub const INITIAL_BALL_DIRECTION: Vec2 = Vec2::new(0.5, -0.5);
@@ -45,19 +45,25 @@ mod entities {
     use super::constants::*;
     use bevy::prelude::*;
     #[derive(Component)]
-    pub(crate) struct Paddle;
+    pub struct PlayerPaddle;
 
     #[derive(Component)]
-    pub(crate) struct Ball;
+    pub struct AIPaddle;
 
     #[derive(Component)]
-    pub(crate) struct Collider;
+    pub struct Ball;
+
+    #[derive(Component)]
+    pub struct Collider;
+
+    #[derive(Component, Deref, DerefMut)]
+    pub struct Velocity(pub Vec2);
 
     // This bundle is a collection of the components that define a "wall" in our game
     #[derive(Bundle)]
     pub struct Walls {
-        sprite_bundle: SpriteBundle,
-        collider: Collider,
+        pub sprite_bundle: SpriteBundle,
+        pub collider: Collider,
     }
 
     pub enum WallSide {
@@ -130,38 +136,160 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
 ) {
     // Camera
     commands.spawn(Camera2dBundle::default());
 
     let player_paddle_x = constants::RIGHT_WALL - constants::GAP_BETWEEN_PADDLE_AND_WALL;
-    let enemy_paddle_x = constants::LEFT_WALL + constants::GAP_BETWEEN_PADDLE_AND_WALL;
+    let ai_paddle_x = constants::LEFT_WALL + constants::GAP_BETWEEN_PADDLE_AND_WALL;
 
-    for offset_x in [player_paddle_x, enemy_paddle_x] {
-        commands.spawn((
-            SpriteBundle {
-                transform: Transform {
-                    translation: Vec3::new(offset_x, 0.0, 0.0),
-                    scale: constants::PADDLE_SIZE,
-                    ..default()
-                },
-                sprite: Sprite {
-                    color: constants::PADDLE_COLOR,
-                    ..default()
-                },
+    commands.spawn((
+        SpriteBundle {
+            transform: Transform {
+                translation: Vec3::new(player_paddle_x, 0.0, 0.0),
+                scale: constants::PADDLE_SIZE,
                 ..default()
             },
-            entities::Paddle,
-            entities::Collider,
-        ));
-    }
+            sprite: Sprite {
+                color: constants::PADDLE_COLOR,
+                ..default()
+            },
+            ..default()
+        },
+        entities::PlayerPaddle,
+        entities::Collider,
+    ));
+
+    commands.spawn((
+        SpriteBundle {
+            transform: Transform {
+                translation: Vec3::new(ai_paddle_x, 0.0, 0.0),
+                scale: constants::PADDLE_SIZE,
+                ..default()
+            },
+            sprite: Sprite {
+                color: constants::PADDLE_COLOR,
+                ..default()
+            },
+            ..default()
+        },
+        entities::AIPaddle,
+        entities::Collider,
+    ));
 
     // Walls
     commands.spawn(entities::Walls::new(entities::WallSide::Top));
     commands.spawn(entities::Walls::new(entities::WallSide::Bottom));
     commands.spawn(entities::Walls::new(entities::WallSide::Enemy));
     commands.spawn(entities::Walls::new(entities::WallSide::Player));
+
+    // Ball
+    commands.spawn((
+        MaterialMesh2dBundle {
+            mesh: meshes.add(shape::Circle::default().into()).into(),
+            material: materials.add(ColorMaterial::from(constants::BALL_COLOR)),
+            transform: Transform::from_translation(constants::BALL_STARTING_POSITION)
+                .with_scale(constants::BALL_SIZE),
+            ..default()
+        },
+        entities::Ball,
+        entities::Velocity(constants::INITIAL_BALL_DIRECTION.normalize() * constants::BALL_SPEED),
+    ));
+}
+
+fn move_paddle(
+    keyboard_input: Res<Input<KeyCode>>,
+    mut query: Query<&mut Transform, With<entities::PlayerPaddle>>,
+    time: Res<Time>,
+) {
+    let mut paddle_transform = query.single_mut();
+    let direction = if keyboard_input.any_pressed([KeyCode::Up, KeyCode::W, KeyCode::K]) {
+        1.0
+    } else if keyboard_input.any_pressed([KeyCode::Down, KeyCode::S, KeyCode::J]) {
+        -1.0
+    } else {
+        0.0
+    };
+
+    // Calculate the new horizontal paddle position based on player input
+    let new_paddle_position =
+        paddle_transform.translation.y + direction * constants::PADDLE_SPEED * time.delta_seconds();
+
+    // Update the paddle position,
+    // making sure it doesn't cause the paddle to leave the arena
+    static TOP_BOUND: f32 = constants::TOP_WALL
+        - constants::WALL_THICKNESS / 2.0
+        - constants::PADDLE_SIZE.y / 2.0
+        - constants::PADDLE_PADDING;
+    static BOTTOM_BOUND: f32 = constants::BOTTOM_WALL
+        + constants::WALL_THICKNESS / 2.0
+        + constants::PADDLE_SIZE.y / 2.0
+        + constants::PADDLE_PADDING;
+
+    paddle_transform.translation.y = new_paddle_position.clamp(BOTTOM_BOUND, TOP_BOUND);
+}
+
+fn apply_velocity(mut query: Query<(&mut Transform, &entities::Velocity)>, time: Res<Time>) {
+    for (mut transform, velocity) in &mut query {
+        transform.translation.x += velocity.x * time.delta_seconds();
+        transform.translation.y += velocity.y * time.delta_seconds();
+    }
+}
+
+fn check_for_collisions(
+    _commands: Commands,
+    // mut scoreboard: ResMut<Scoreboard>,
+    mut ball_query: Query<(&mut entities::Velocity, &Transform), With<entities::Ball>>,
+    collider_query: Query<(Entity, &Transform), With<entities::Collider>>,
+    mut collision_events: EventWriter<CollisionEvent>,
+) {
+    let (mut ball_velocity, ball_transform) = ball_query.single_mut();
+    let ball_size = ball_transform.scale.truncate();
+
+    // check collision with walls
+    for (_collider_entity, transform) in &collider_query {
+        let collision = collide(
+            ball_transform.translation,
+            ball_size,
+            transform.translation,
+            transform.scale.truncate(),
+        );
+        if let Some(collision) = collision {
+            // Sends a collision event so that other systems can react to the collision
+            collision_events.send_default();
+
+            // Bricks should be despawned and increment the scoreboard on collision
+            // if maybe_brick.is_some() {
+            // scoreboard.score += 1;
+            //     commands.entity(collider_entity).despawn();
+            // }
+
+            // reflect the ball when it collides
+            let mut reflect_x = false;
+            let mut reflect_y = false;
+
+            // only reflect if the ball's velocity is going in the opposite direction of the
+            // collision
+            match collision {
+                Collision::Left => reflect_x = ball_velocity.x > 0.0,
+                Collision::Right => reflect_x = ball_velocity.x < 0.0,
+                Collision::Top => reflect_y = ball_velocity.y < 0.0,
+                Collision::Bottom => reflect_y = ball_velocity.y > 0.0,
+                Collision::Inside => { /* do nothing */ }
+            }
+
+            // reflect velocity on the x-axis if we hit something on the x-axis
+            if reflect_x {
+                ball_velocity.x = -ball_velocity.x;
+            }
+
+            // reflect velocity on the y-axis if we hit something on the y-axis
+            if reflect_y {
+                ball_velocity.y = -ball_velocity.y;
+            }
+        }
+    }
 }
 
 fn main() {
@@ -172,19 +300,15 @@ fn main() {
         .add_systems(Startup, setup)
         // Add our gameplay simulation systems to the fixed timestep schedule
         // which runs at 64 Hz by default
-        /*
         .add_systems(
             FixedUpdate,
             (
                 apply_velocity,
                 move_paddle,
                 check_for_collisions,
-                play_collision_sound,
-            )
-                // `chain`ing systems together runs them in order
-                .chain(),
+                // play_collision_sound,
+            ), // `chain`ing systems together runs them in order
         )
-        */
         // .add_systems(Update, (update_scoreboard, bevy::window::close_on_esc))
         .add_systems(Update, bevy::window::close_on_esc)
         .run();

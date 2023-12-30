@@ -12,6 +12,7 @@ bevy = { version = "0.12.1", features = [ "wayland" ] }
 opt-level = 1
 
 # Enable high optimizations for dependencies (incl. Bevy), but not for our code:
-# [profile.dev.package."*"]
-# opt-level = 3
+# required for dynamic linking
+[profile.dev.package."*"]
+opt-level = 3
 
