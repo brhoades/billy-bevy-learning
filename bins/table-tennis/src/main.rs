@@ -47,16 +47,20 @@ mod constants {
 mod entities {
     use super::constants::*;
     use bevy::prelude::*;
-    #[derive(Component)]
-    pub struct PlayerPaddle;
 
-    #[derive(Component)]
-    pub struct AIPaddle;
+    #[derive(Component, Debug, Clone)]
+    pub struct Paddle;
 
-    #[derive(Component)]
+    #[derive(Component, Debug)]
+    pub struct Player;
+
+    #[derive(Component, Debug)]
+    pub struct AI;
+
+    #[derive(Component, Debug, Clone)]
     pub struct Ball;
 
-    #[derive(Component)]
+    #[derive(Component, Debug)]
     pub struct Collider;
 
     #[derive(Component, Deref, DerefMut)]
@@ -67,8 +71,10 @@ mod entities {
     pub struct Walls {
         pub sprite_bundle: SpriteBundle,
         pub collider: Collider,
+        pub side: WallSide,
     }
 
+    #[derive(Component, Debug, Clone)]
     pub enum WallSide {
         Top,
         Bottom,
@@ -120,13 +126,22 @@ mod entities {
                     ..default()
                 },
                 collider: Collider,
+                side: location,
             }
         }
     }
 }
 
-#[derive(Event, Default)]
-struct CollisionEvent;
+enum Owner {
+    Player,
+    AI,
+}
+
+#[derive(Event)]
+enum CollisionEvent {
+    Wall(entities::Ball, entities::WallSide),
+    Paddle(entities::Ball, entities::Paddle, Owner),
+}
 
 fn setup(
     mut commands: Commands,
@@ -153,7 +168,8 @@ fn setup(
             },
             ..default()
         },
-        entities::PlayerPaddle,
+        entities::Player,
+        entities::Paddle,
         entities::Collider,
     ));
 
@@ -170,7 +186,8 @@ fn setup(
             },
             ..default()
         },
-        entities::AIPaddle,
+        entities::AI,
+        entities::Paddle,
         entities::Collider,
     ));
 
@@ -196,7 +213,7 @@ fn setup(
 
 fn move_player_paddle(
     keyboard_input: Res<Input<KeyCode>>,
-    mut query: Query<&mut Transform, With<entities::PlayerPaddle>>,
+    mut query: Query<&mut Transform, (With<entities::Player>, With<entities::Paddle>)>,
     time: Res<Time>,
 ) {
     let mut paddle_transform = query.single_mut();
@@ -217,8 +234,8 @@ fn move_player_paddle(
 }
 
 fn enemy_paddle_ai(
-    mut paddle_query: Query<&mut Transform, (With<entities::AIPaddle>, Without<entities::Ball>)>,
-    ball_query: Query<&Transform, (With<entities::Ball>, Without<entities::AIPaddle>)>,
+    mut paddle_query: Query<&mut Transform, (With<entities::AI>, With<entities::Paddle>)>,
+    ball_query: Query<&Transform, (With<entities::Ball>, Without<entities::AI>)>,
     time: Res<Time>,
 ) {
     let mut paddle_transform = paddle_query.single_mut();
@@ -246,18 +263,60 @@ fn apply_velocity(mut query: Query<(&mut Transform, &entities::Velocity)>, time:
     }
 }
 
-fn check_for_collisions(
-    _commands: Commands,
-    // mut scoreboard: ResMut<Scoreboard>,
-    mut ball_query: Query<(&mut entities::Velocity, &Transform), With<entities::Ball>>,
-    collider_query: Query<(Entity, &Transform), With<entities::Collider>>,
+fn check_ball_score(
+    ball_q: Query<(&entities::Ball, &Transform), With<entities::Ball>>,
+    collider_q: Query<
+        (
+            &Transform,
+            (Option<&entities::AI>, Option<&entities::Player>),
+            (Option<&entities::WallSide>, Option<&entities::Paddle>),
+        ),
+        With<entities::Collider>,
+    >,
     mut collision_events: EventWriter<CollisionEvent>,
+) {
+    let (ball, ball_transform) = ball_q.single();
+    let ball_size = ball_transform.scale.truncate();
+
+    // check collision with walls
+    for (transform, player_kind, entity_kind) in &collider_q {
+        if collide(
+            ball_transform.translation,
+            ball_size,
+            transform.translation,
+            transform.scale.truncate(),
+        )
+        .is_none()
+        {
+            return;
+        }
+
+        let ball = ball.to_owned();
+        // yuck
+        let ev = match (player_kind, entity_kind) {
+            ((Some(_), None), (Some(ws), None)) => CollisionEvent::Wall(ball, ws.clone()),
+            ((None, Some(_)), (Some(ws), None)) => CollisionEvent::Wall(ball, ws.clone()),
+            ((Some(_), None), (None, Some(pd))) => {
+                CollisionEvent::Paddle(ball, pd.clone(), Owner::AI)
+            }
+            ((None, Some(_)), (None, Some(pd))) => {
+                CollisionEvent::Paddle(ball, pd.clone(), Owner::Player)
+            }
+            other => unreachable!("cannot reach {other:?}"),
+        };
+        collision_events.send(ev);
+    }
+}
+
+fn check_ball_bounce_collisions(
+    mut ball_query: Query<(&mut entities::Velocity, &Transform), With<entities::Ball>>,
+    collider_query: Query<&Transform, With<entities::Collider>>,
 ) {
     let (mut ball_velocity, ball_transform) = ball_query.single_mut();
     let ball_size = ball_transform.scale.truncate();
 
     // check collision with walls
-    for (_collider_entity, transform) in &collider_query {
+    for transform in &collider_query {
         let collision = collide(
             ball_transform.translation,
             ball_size,
@@ -265,15 +324,6 @@ fn check_for_collisions(
             transform.scale.truncate(),
         );
         if let Some(collision) = collision {
-            // Sends a collision event so that other systems can react to the collision
-            collision_events.send_default();
-
-            // Bricks should be despawned and increment the scoreboard on collision
-            // if maybe_brick.is_some() {
-            // scoreboard.score += 1;
-            //     commands.entity(collider_entity).despawn();
-            // }
-
             // reflect the ball when it collides
             let mut reflect_x = false;
             let mut reflect_y = false;
@@ -285,7 +335,7 @@ fn check_for_collisions(
                 Collision::Right => reflect_x = ball_velocity.x < 0.0,
                 Collision::Top => reflect_y = ball_velocity.y < 0.0,
                 Collision::Bottom => reflect_y = ball_velocity.y > 0.0,
-                Collision::Inside => { /* do nothing */ }
+                Collision::Inside => (),
             }
 
             // reflect velocity on the x-axis if we hit something on the x-axis
@@ -314,7 +364,8 @@ fn main() {
             (
                 apply_velocity,
                 move_player_paddle,
-                check_for_collisions,
+                check_ball_bounce_collisions,
+                check_ball_score,
                 // play_collision_sound,
             ), // `chain`ing systems together runs them in order
         )
