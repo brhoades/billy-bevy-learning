@@ -140,6 +140,27 @@ mod entities {
     }
 }
 
+fn spawn_ball(
+    materials: &mut ResMut<Assets<ColorMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+) -> (
+    MaterialMesh2dBundle<ColorMaterial>,
+    entities::Ball,
+    entities::Velocity,
+) {
+    (
+        MaterialMesh2dBundle {
+            mesh: meshes.add(shape::Circle::default().into()).into(),
+            material: materials.add(ColorMaterial::from(constants::BALL_COLOR)),
+            transform: Transform::from_translation(constants::BALL_STARTING_POSITION)
+                .with_scale(constants::BALL_SIZE),
+            ..default()
+        },
+        entities::Ball,
+        entities::Velocity(constants::INITIAL_BALL_DIRECTION.normalize() * constants::BALL_SPEED),
+    )
+}
+
 #[derive(Debug)]
 enum Owner {
     Player,
@@ -213,17 +234,7 @@ fn setup(
     commands.spawn(entities::Walls::new(entities::WallSide::Player));
 
     // Ball
-    commands.spawn((
-        MaterialMesh2dBundle {
-            mesh: meshes.add(shape::Circle::default().into()).into(),
-            material: materials.add(ColorMaterial::from(constants::BALL_COLOR)),
-            transform: Transform::from_translation(constants::BALL_STARTING_POSITION)
-                .with_scale(constants::BALL_SIZE),
-            ..default()
-        },
-        entities::Ball,
-        entities::Velocity(constants::INITIAL_BALL_DIRECTION.normalize() * constants::BALL_SPEED),
-    ));
+    commands.spawn(spawn_ball(&mut materials, &mut meshes));
 
     // AI Score
     commands.spawn((
