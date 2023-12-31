@@ -447,6 +447,27 @@ fn update_scoreboard(
     ai_scoreboard.single_mut().sections[0].value = scores.ai.to_string();
 }
 
+fn handle_round_over(
+    mut commands: Commands,
+    mut collision_events: EventReader<CollisionEvent>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    ball_query: Query<Entity, With<entities::Ball>>,
+) {
+    use entities::WallSide::*;
+
+    let Some(_) = collision_events
+        .read()
+        .find(|ev| matches!(ev, CollisionEvent::Wall(_, Player | Enemy)))
+    else {
+        return;
+    };
+
+    let ball = ball_query.single();
+    commands.entity(ball).despawn();
+    commands.spawn(spawn_ball(&mut materials, &mut meshes));
+}
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
@@ -466,6 +487,7 @@ fn main() {
                 tally_score,
                 update_scoreboard,
                 enemy_paddle_ai,
+                handle_round_over,
             ),
         )
         // .add_systems(Update, (update_scoreboard, bevy::window::close_on_esc))
