@@ -1,3 +1,8 @@
+use std::{
+    collections::HashSet,
+    iter::{repeat, Flatten, Repeat},
+};
+
 use bevy::{
     prelude::*,
     sprite::collide_aabb::{collide, Collision},
@@ -53,16 +58,16 @@ mod entities {
     use super::constants::*;
     use bevy::prelude::*;
 
-    #[derive(Component, Debug, Clone)]
+    #[derive(Component, Debug, Clone, Hash, PartialEq, Eq)]
     pub struct Paddle;
 
-    #[derive(Component, Debug)]
+    #[derive(Component, Debug, Hash, PartialEq, Eq)]
     pub struct Player;
 
-    #[derive(Component, Debug)]
+    #[derive(Component, Debug, Hash, PartialEq, Eq)]
     pub struct AI;
 
-    #[derive(Component, Debug, Clone)]
+    #[derive(Component, Debug, Clone, Hash, PartialEq, Eq)]
     pub struct Ball;
 
     #[derive(Component, Debug)]
@@ -82,7 +87,7 @@ mod entities {
         pub side: WallSide,
     }
 
-    #[derive(Component, Debug, Clone)]
+    #[derive(Component, Debug, Clone, Hash, PartialEq, Eq)]
     pub enum WallSide {
         Top,
         Bottom,
@@ -161,13 +166,13 @@ fn spawn_ball(
     )
 }
 
-#[derive(Debug)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 enum Owner {
     Player,
     AI,
 }
 
-#[derive(Debug, Event)]
+#[derive(Debug, Event, Hash, PartialEq, Eq)]
 enum CollisionEvent {
     Wall(entities::Ball, entities::WallSide),
     Paddle(entities::Ball, entities::Paddle, Owner),
@@ -179,11 +184,40 @@ pub struct Scoreboard {
     pub player: usize,
 }
 
+// provides an alternating collision sound.
+#[derive(Resource)]
+struct CollisionSound {
+    iter: Flatten<Repeat<Vec<Handle<AudioSource>>>>,
+    // the same collion can occur in contiguous frames, debounce them with this instant
+    last: f32,
+}
+
+impl FromIterator<Handle<AudioSource>> for CollisionSound {
+    fn from_iter<T: IntoIterator<Item = Handle<AudioSource>>>(iter: T) -> Self {
+        CollisionSound {
+            iter: repeat(iter.into_iter().collect::<Vec<_>>()).flatten(),
+            last: 0.,
+        }
+    }
+}
+
+impl CollisionSound {
+    // returns a sound if we haven't played one recently, otherwise None
+    fn next(&mut self, time: f32) -> Option<Handle<AudioSource>> {
+        if time - self.last < 0.05 {
+            return None;
+        }
+
+        self.last = time;
+        self.iter.next()
+    }
+}
+
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    _asset_server: Res<AssetServer>,
+    asset_server: Res<AssetServer>,
 ) {
     // Camera
     commands.spawn(Camera2dBundle::default());
@@ -273,6 +307,11 @@ fn setup(
         entities::ScoreboardText,
         entities::Player,
     ));
+
+    commands.insert_resource(CollisionSound::from_iter([
+        asset_server.load("high_beep_short.ogg"),
+        asset_server.load("low_beep_short.ogg"),
+    ]));
 }
 
 fn move_player_paddle(
@@ -341,6 +380,7 @@ fn generate_ball_collide_events(
 ) {
     let (ball, ball_transform) = ball_q.single();
     let ball_size = ball_transform.scale.truncate();
+    let mut events = HashSet::new();
 
     // check collision with walls
     for (transform, player_kind, entity_kind) in &collider_q {
@@ -367,6 +407,11 @@ fn generate_ball_collide_events(
             }
             other => unreachable!("cannot reach {other:?}"),
         };
+        println!("Collision: {ev:?}");
+        events.insert(ev);
+    }
+
+    for ev in events {
         collision_events.send(ev);
     }
 }
@@ -468,6 +513,31 @@ fn handle_round_over(
     commands.spawn(spawn_ball(&mut materials, &mut meshes));
 }
 
+fn play_collision_sound(
+    mut commands: Commands,
+    mut collision_events: EventReader<CollisionEvent>,
+    mut sound: ResMut<CollisionSound>,
+    time: Res<Time<Real>>,
+) {
+    if collision_events.read().any(|ev| {
+        !matches!(
+            ev,
+            CollisionEvent::Wall(_, entities::WallSide::Player | entities::WallSide::Enemy)
+        ) || matches!(ev, CollisionEvent::Paddle(_, _, _))
+    }) {
+        collision_events.clear(); // consume them all
+
+        let time = time.elapsed_seconds();
+
+        if let Some(source) = sound.next(time) {
+            commands.spawn(AudioBundle {
+                source,
+                settings: PlaybackSettings::DESPAWN,
+            });
+        }
+    }
+}
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
@@ -481,13 +551,15 @@ fn main() {
             FixedUpdate,
             (
                 move_player_paddle,
-                apply_velocity,
                 generate_ball_collide_events,
+                // move the ball after making events or we'll miss events
+                apply_velocity,
                 check_ball_bounce_collisions,
                 tally_score,
                 update_scoreboard,
                 enemy_paddle_ai,
                 handle_round_over,
+                play_collision_sound,
             ),
         )
         // .add_systems(Update, (update_scoreboard, bevy::window::close_on_esc))
