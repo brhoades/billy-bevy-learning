@@ -28,17 +28,20 @@ mod constants {
     pub const BOTTOM_WALL: f32 = -300.;
     pub const TOP_WALL: f32 = 300.;
 
-    // These values are exact
-    pub const GAP_BETWEEN_PADDLE_AND_BRICKS: f32 = 270.0;
-    pub const GAP_BETWEEN_BRICKS: f32 = 5.0;
-    // These values are lower bounds, as the number of bricks is computed
-    pub const GAP_BETWEEN_BRICKS_AND_CEILING: f32 = 20.0;
-    pub const GAP_BETWEEN_BRICKS_AND_SIDES: f32 = 20.0;
+    // Update the paddle position,
+    // making sure it doesn't cause the paddle to leave the arena
+    pub const PADDLE_TOP_BOUND: f32 =
+        TOP_WALL - WALL_THICKNESS / 2.0 - PADDLE_SIZE.y / 2.0 - PADDLE_PADDING;
+    pub const PADDLE_BOTTOM_BOUND: f32 =
+        BOTTOM_WALL + WALL_THICKNESS / 2.0 + PADDLE_SIZE.y / 2.0 + PADDLE_PADDING;
 
+    // These values are exact
     pub const BACKGROUND_COLOR: Color = Color::rgb(0.9, 0.9, 0.9);
     pub const PADDLE_COLOR: Color = Color::rgb(0.3, 0.3, 0.7);
     pub const BALL_COLOR: Color = Color::rgb(1.0, 0.5, 0.5);
     pub const WALL_COLOR: Color = Color::rgb(0.8, 0.8, 0.8);
+
+    pub const MAX_AI_PADDLE_SPEED: f32 = 500.0;
 }
 
 mod entities {
@@ -102,18 +105,11 @@ mod entities {
     }
 
     impl Walls {
-        // This "builder method" allows us to reuse logic across our wall entities,
-        // making our code easier to read and less prone to bugs when we change the logic
         pub fn new(location: WallSide) -> Self {
             Self {
                 sprite_bundle: SpriteBundle {
                     transform: Transform {
-                        // We need to convert our Vec2 into a Vec3, by giving it a z-coordinate
-                        // This is used to determine the order of our sprites
                         translation: location.position().extend(0.0),
-                        // The z-scale of 2D objects must always be 1.0,
-                        // or their ordering will be affected in surprising ways.
-                        // See https://github.com/bevyengine/bevy/issues/4149
                         scale: location.size().extend(1.0),
                         ..default()
                     },
@@ -198,7 +194,7 @@ fn setup(
     ));
 }
 
-fn move_paddle(
+fn move_player_paddle(
     keyboard_input: Res<Input<KeyCode>>,
     mut query: Query<&mut Transform, With<entities::PlayerPaddle>>,
     time: Res<Time>,
@@ -216,18 +212,31 @@ fn move_paddle(
     let new_paddle_position =
         paddle_transform.translation.y + direction * constants::PADDLE_SPEED * time.delta_seconds();
 
-    // Update the paddle position,
-    // making sure it doesn't cause the paddle to leave the arena
-    static TOP_BOUND: f32 = constants::TOP_WALL
-        - constants::WALL_THICKNESS / 2.0
-        - constants::PADDLE_SIZE.y / 2.0
-        - constants::PADDLE_PADDING;
-    static BOTTOM_BOUND: f32 = constants::BOTTOM_WALL
-        + constants::WALL_THICKNESS / 2.0
-        + constants::PADDLE_SIZE.y / 2.0
-        + constants::PADDLE_PADDING;
+    paddle_transform.translation.y =
+        new_paddle_position.clamp(constants::PADDLE_BOTTOM_BOUND, constants::PADDLE_TOP_BOUND);
+}
 
-    paddle_transform.translation.y = new_paddle_position.clamp(BOTTOM_BOUND, TOP_BOUND);
+fn enemy_paddle_ai(
+    mut paddle_query: Query<&mut Transform, (With<entities::AIPaddle>, Without<entities::Ball>)>,
+    ball_query: Query<&Transform, (With<entities::Ball>, Without<entities::AIPaddle>)>,
+    time: Res<Time>,
+) {
+    let mut paddle_transform = paddle_query.single_mut();
+
+    let ball_transform = ball_query.single();
+
+    // anticipate next ball position, adjust paddle. clamp to a player speed
+    let next_y = ball_transform.translation.y;
+
+    // Calculate the new horizontal paddle position based on player input
+    let new_paddle_position = paddle_transform.translation.y
+        + (next_y - paddle_transform.translation.y).clamp(
+            -constants::MAX_AI_PADDLE_SPEED * time.delta_seconds(),
+            constants::MAX_AI_PADDLE_SPEED * time.delta_seconds(),
+        );
+
+    paddle_transform.translation.y =
+        new_paddle_position.clamp(constants::PADDLE_BOTTOM_BOUND, constants::PADDLE_TOP_BOUND);
 }
 
 fn apply_velocity(mut query: Query<(&mut Transform, &entities::Velocity)>, time: Res<Time>) {
@@ -304,11 +313,12 @@ fn main() {
             FixedUpdate,
             (
                 apply_velocity,
-                move_paddle,
+                move_player_paddle,
                 check_for_collisions,
                 // play_collision_sound,
             ), // `chain`ing systems together runs them in order
         )
+        .add_systems(Update, enemy_paddle_ai)
         // .add_systems(Update, (update_scoreboard, bevy::window::close_on_esc))
         .add_systems(Update, bevy::window::close_on_esc)
         .run();
