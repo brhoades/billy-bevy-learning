@@ -46,7 +46,7 @@ mod constants {
     pub const SCOREBOARD_FONT_SIZE: f32 = 40.0;
     pub const SCOREBOARD_PADDING_X: f32 =
         WALL_THICKNESS + GAP_BETWEEN_PADDLE_AND_WALL + (RIGHT_WALL - LEFT_WALL) / 5.0;
-    pub const SCOREBOARD_PADDING_Y: f32 = (TOP_WALL - BOTTOM_WALL) / 5.0 + WALL_THICKNESS;
+    pub const SCOREBOARD_PADDING_Y: f32 = (TOP_WALL - BOTTOM_WALL) / 10.0 + WALL_THICKNESS;
 }
 
 mod entities {
@@ -227,34 +227,38 @@ fn setup(
 
     // AI Score
     commands.spawn((
-        TextBundle::from_sections([TextSection::from_style(TextStyle {
-            font_size: constants::SCOREBOARD_FONT_SIZE,
-            color: Color::GRAY,
+        Text2dBundle {
+            text: Text::from_sections([TextSection::from_style(TextStyle {
+                font_size: constants::SCOREBOARD_FONT_SIZE,
+                color: Color::GRAY,
+                ..default()
+            })]),
+            transform: Transform::from_translation(Vec3::new(
+                constants::LEFT_WALL + constants::SCOREBOARD_PADDING_X,
+                constants::TOP_WALL - constants::SCOREBOARD_PADDING_Y,
+                1.0,
+            )),
             ..default()
-        })])
-        .with_style(Style {
-            position_type: PositionType::Absolute,
-            top: Val::Px(constants::TOP_WALL + constants::SCOREBOARD_PADDING_Y),
-            left: Val::Px(constants::LEFT_WALL + constants::SCOREBOARD_PADDING_X),
-            ..default()
-        }),
+        },
         entities::ScoreboardText,
         entities::AI,
     ));
 
     // Player Score
     commands.spawn((
-        TextBundle::from_sections([TextSection::from_style(TextStyle {
-            font_size: constants::SCOREBOARD_FONT_SIZE,
-            color: Color::GRAY,
+        Text2dBundle {
+            text: Text::from_sections([TextSection::from_style(TextStyle {
+                font_size: constants::SCOREBOARD_FONT_SIZE,
+                color: Color::GRAY,
+                ..default()
+            })]),
+            transform: Transform::from_translation(Vec3::new(
+                constants::RIGHT_WALL - constants::SCOREBOARD_PADDING_X,
+                constants::TOP_WALL - constants::SCOREBOARD_PADDING_Y,
+                1.0,
+            )),
             ..default()
-        })])
-        .with_style(Style {
-            position_type: PositionType::Absolute,
-            top: Val::Px(constants::TOP_WALL + constants::SCOREBOARD_PADDING_Y),
-            left: Val::Px(constants::RIGHT_WALL - constants::SCOREBOARD_PADDING_X),
-            ..default()
-        }),
+        },
         entities::ScoreboardText,
         entities::Player,
     ));
@@ -406,8 +410,6 @@ fn tally_score(mut collision_events: EventReader<CollisionEvent>, mut scores: Re
             CollisionEvent::Wall(_, entities::WallSide::Player) => scores.player += 1,
             CollisionEvent::Wall(_, _) => (),
         }
-
-        println!("collision: {ev:?}");
     }
 }
 
