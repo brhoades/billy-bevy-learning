@@ -36,10 +36,10 @@ mod constants {
         BOTTOM_WALL + WALL_THICKNESS / 2.0 + PADDLE_SIZE.y / 2.0 + PADDLE_PADDING;
 
     // These values are exact
-    pub const BACKGROUND_COLOR: Color = Color::rgb(0.9, 0.9, 0.9);
-    pub const PADDLE_COLOR: Color = Color::rgb(0.3, 0.3, 0.7);
-    pub const BALL_COLOR: Color = Color::rgb(1.0, 0.5, 0.5);
-    pub const WALL_COLOR: Color = Color::rgb(0.8, 0.8, 0.8);
+    pub const BACKGROUND_COLOR: Color = Color::BLACK;
+    pub const PADDLE_COLOR: Color = Color::WHITE;
+    pub const BALL_COLOR: Color = Color::RED;
+    pub const WALL_COLOR: Color = Color::DARK_GRAY;
 
     pub const MAX_AI_PADDLE_SPEED: f32 = 500.0;
 }
