@@ -42,6 +42,11 @@ mod constants {
     pub const WALL_COLOR: Color = Color::DARK_GRAY;
 
     pub const MAX_AI_PADDLE_SPEED: f32 = 500.0;
+
+    pub const SCOREBOARD_FONT_SIZE: f32 = 40.0;
+    pub const SCOREBOARD_PADDING_X: f32 =
+        WALL_THICKNESS + GAP_BETWEEN_PADDLE_AND_WALL + (RIGHT_WALL - LEFT_WALL) / 5.0;
+    pub const SCOREBOARD_PADDING_Y: f32 = (TOP_WALL - BOTTOM_WALL) / 5.0 + WALL_THICKNESS;
 }
 
 mod entities {
@@ -65,6 +70,9 @@ mod entities {
 
     #[derive(Component, Deref, DerefMut)]
     pub struct Velocity(pub Vec2);
+
+    #[derive(Component, Debug)]
+    pub struct ScoreboardText;
 
     // This bundle is a collection of the components that define a "wall" in our game
     #[derive(Bundle)]
@@ -132,15 +140,22 @@ mod entities {
     }
 }
 
+#[derive(Debug)]
 enum Owner {
     Player,
     AI,
 }
 
-#[derive(Event)]
+#[derive(Debug, Event)]
 enum CollisionEvent {
     Wall(entities::Ball, entities::WallSide),
     Paddle(entities::Ball, entities::Paddle, Owner),
+}
+
+#[derive(Resource, Default)]
+pub struct Scoreboard {
+    pub ai: usize,
+    pub player: usize,
 }
 
 fn setup(
@@ -209,6 +224,40 @@ fn setup(
         entities::Ball,
         entities::Velocity(constants::INITIAL_BALL_DIRECTION.normalize() * constants::BALL_SPEED),
     ));
+
+    // AI Score
+    commands.spawn((
+        TextBundle::from_sections([TextSection::from_style(TextStyle {
+            font_size: constants::SCOREBOARD_FONT_SIZE,
+            color: Color::GRAY,
+            ..default()
+        })])
+        .with_style(Style {
+            position_type: PositionType::Absolute,
+            top: Val::Px(constants::TOP_WALL + constants::SCOREBOARD_PADDING_Y),
+            left: Val::Px(constants::LEFT_WALL + constants::SCOREBOARD_PADDING_X),
+            ..default()
+        }),
+        entities::ScoreboardText,
+        entities::AI,
+    ));
+
+    // Player Score
+    commands.spawn((
+        TextBundle::from_sections([TextSection::from_style(TextStyle {
+            font_size: constants::SCOREBOARD_FONT_SIZE,
+            color: Color::GRAY,
+            ..default()
+        })])
+        .with_style(Style {
+            position_type: PositionType::Absolute,
+            top: Val::Px(constants::TOP_WALL + constants::SCOREBOARD_PADDING_Y),
+            left: Val::Px(constants::RIGHT_WALL - constants::SCOREBOARD_PADDING_X),
+            ..default()
+        }),
+        entities::ScoreboardText,
+        entities::Player,
+    ));
 }
 
 fn move_player_paddle(
@@ -263,7 +312,7 @@ fn apply_velocity(mut query: Query<(&mut Transform, &entities::Velocity)>, time:
     }
 }
 
-fn check_ball_score(
+fn generate_ball_collide_events(
     ball_q: Query<(&entities::Ball, &Transform), With<entities::Ball>>,
     collider_q: Query<
         (
@@ -288,14 +337,13 @@ fn check_ball_score(
         )
         .is_none()
         {
-            return;
+            continue;
         }
 
         let ball = ball.to_owned();
         // yuck
         let ev = match (player_kind, entity_kind) {
-            ((Some(_), None), (Some(ws), None)) => CollisionEvent::Wall(ball, ws.clone()),
-            ((None, Some(_)), (Some(ws), None)) => CollisionEvent::Wall(ball, ws.clone()),
+            (_, (Some(ws), None)) => CollisionEvent::Wall(ball, ws.clone()),
             ((Some(_), None), (None, Some(pd))) => {
                 CollisionEvent::Paddle(ball, pd.clone(), Owner::AI)
             }
@@ -315,7 +363,6 @@ fn check_ball_bounce_collisions(
     let (mut ball_velocity, ball_transform) = ball_query.single_mut();
     let ball_size = ball_transform.scale.truncate();
 
-    // check collision with walls
     for transform in &collider_query {
         let collision = collide(
             ball_transform.translation,
@@ -351,10 +398,47 @@ fn check_ball_bounce_collisions(
     }
 }
 
+fn tally_score(mut collision_events: EventReader<CollisionEvent>, mut scores: ResMut<Scoreboard>) {
+    for ev in collision_events.read() {
+        match ev {
+            CollisionEvent::Paddle(_, _, _) => (),
+            CollisionEvent::Wall(_, entities::WallSide::Enemy) => scores.ai += 1,
+            CollisionEvent::Wall(_, entities::WallSide::Player) => scores.player += 1,
+            CollisionEvent::Wall(_, _) => (),
+        }
+
+        println!("collision: {ev:?}");
+    }
+}
+
+fn update_scoreboard(
+    mut player_scoreboard: Query<
+        &mut Text,
+        (
+            With<entities::ScoreboardText>,
+            With<entities::Player>,
+            Without<entities::AI>,
+        ),
+    >,
+    mut ai_scoreboard: Query<
+        &mut Text,
+        (
+            With<entities::ScoreboardText>,
+            With<entities::AI>,
+            Without<entities::Player>,
+        ),
+    >,
+    scores: Res<Scoreboard>,
+) {
+    player_scoreboard.single_mut().sections[0].value = scores.player.to_string();
+    ai_scoreboard.single_mut().sections[0].value = scores.ai.to_string();
+}
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .insert_resource(ClearColor(constants::BACKGROUND_COLOR))
+        .insert_resource(Scoreboard::default())
         .add_event::<CollisionEvent>()
         .add_systems(Startup, setup)
         // Add our gameplay simulation systems to the fixed timestep schedule
@@ -362,14 +446,15 @@ fn main() {
         .add_systems(
             FixedUpdate,
             (
-                apply_velocity,
                 move_player_paddle,
+                apply_velocity,
+                generate_ball_collide_events,
                 check_ball_bounce_collisions,
-                check_ball_score,
-                // play_collision_sound,
-            ), // `chain`ing systems together runs them in order
+                tally_score,
+                update_scoreboard,
+                enemy_paddle_ai,
+            ),
         )
-        .add_systems(Update, enemy_paddle_ai)
         // .add_systems(Update, (update_scoreboard, bevy::window::close_on_esc))
         .add_systems(Update, bevy::window::close_on_esc)
         .run();
