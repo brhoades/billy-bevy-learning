@@ -12,14 +12,12 @@
     in {
       devShells.default = with pkgs; mkShell {
         buildInputs = [
-          cargo
-          rustc
-          rust-analyzer
-          clippy
-          rustfmt
+          rustup
           bacon
+          wasm-bindgen-cli
 
           pkg-config
+
         ] ++ (lib.optionals pkgs.stdenv.isLinux [
           alsaLib
           udev
