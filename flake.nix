@@ -13,11 +13,8 @@
       devShells.default = with pkgs; mkShell {
         buildInputs = [
           rustup
-          bacon
-          wasm-bindgen-cli
 
           pkg-config
-
         ] ++ (lib.optionals pkgs.stdenv.isLinux [
           alsaLib
           udev

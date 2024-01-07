@@ -5,7 +5,7 @@ members = [
 ]
 
 [workspace.dependencies]
-bevy = { version = "0.12.1", features = [ "wayland" ] } #, "dynamic_linking" ] }
+bevy = { version = "0.12.1", features = [ "wayland", "dynamic_linking" ] }
 
 # Enable a small amount of optimization in debug mode
 [profile.dev]
